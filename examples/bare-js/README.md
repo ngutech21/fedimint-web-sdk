@@ -21,3 +21,5 @@ pnpm i
 # run the dev server
 pnpm run dev:bare
 ```
+
+Then open `/examples/bare-js/` in the browser.

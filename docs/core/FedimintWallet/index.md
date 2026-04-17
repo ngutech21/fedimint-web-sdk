@@ -1,6 +1,6 @@
 # FedimintWallet Overview
 
-The `FedimintWallet` class serves as the main entry point for the library. It orchestrates the various services and the TransportClient.
+`WalletDirector` is the main entry point for the library. It creates `FedimintWallet` instances, and each `FedimintWallet` exposes the services documented on this page.
 
 ::: info
 Check out the [Getting Started](../getting-started) guide to get started using the Fedimint Sdk.

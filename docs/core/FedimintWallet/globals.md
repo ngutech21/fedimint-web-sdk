@@ -2,7 +2,7 @@
 
 ## Classes
 
-- [FedimintWallet]()
+- `FedimintWallet` instances are created via `WalletDirector.createWallet()`
 
 ## Type Aliases
 

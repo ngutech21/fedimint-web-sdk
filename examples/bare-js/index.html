@@ -2,90 +2,243 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    >
     <title>Testy Fedimint Sdk Bare</title>
     <link rel="stylesheet" href="style.css">
   </head>
 
-<body>
-  <!-- UI Code -->
-  <div class="container">
-    <h2>Fedimint Sdk Bare html/js example</h2>
-    <div id="actions">
-      <button id="getBalance">wallet.balance.getBalance()</button>
-      <button id="createInvoice">wallet.lightning.createInvoice(1000, 'Test Invoice')</button>
+  <body>
+    <!-- UI Code -->
+    <div class="container">
+      <h2>Fedimint Sdk Bare html/js example</h2>
+      <div id="actions">
+        <button id="getBalance">wallet.balance.getBalance()</button>
+        <button id="createInvoice">
+          wallet.lightning.createInvoice(1000, 'Test Invoice')
+        </button>
+      </div>
+      <p>Console output:</p>
+      <div id="console"></div>
+      <p>
+        Faucet Link:
+        <a href="https://faucet.mutinynet.com/" target="_blank"
+          >https://faucet.mutinynet.com/</a
+        >
+      </p>
     </div>
-    <p>Console output:</p>
-    <div id="console"></div>
-    <p>Faucet Link: <a href="https://faucet.mutinynet.com/" target="_blank">https://faucet.mutinynet.com/</a></p>
-  </div>
 
-  <script type="module">
-    // Import the @fedimint/core library
-    import * as Default from './index.js';
-    const { FedimintWallet } = Default;
+    <script type="module">
+      import { WalletDirector } from './index.js'
 
     ////////////////////////////////
     //////////// Setup /////////////
     ////////////////////////////////
 
-    // Override console methods to display in UI
-    const consoleDiv = document.getElementById('console');
-    ['log', 'error', 'warn', 'info'].forEach(method => {
-      const original = console[method];
-      console[method] = (...args) => {
-        original.apply(console, args);
-        const message = args.map(arg => 
-          typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg
-        ).join(' ');
-        consoleDiv.innerHTML += `${message}\n`;
-        consoleDiv.scrollTop = consoleDiv.scrollHeight;
-      };
-    });
-
-    /////////////////////////////////
-    ///////// Wallet Setup //////////
-    ////////////////////////////////
-
-    let wallet;
-    const TESTNET_INVITE_CODE = 'fed11qgqzc2nhwden5te0vejkg6tdd9h8gepwvejkg6tdd9h8garhduhx6at5d9h8jmn9wshxxmmd9uqqzgxg6s3evnr6m9zdxr6hxkdkukexpcs3mn7mj3g5pc5dfh63l4tj6g9zk4er';
-
-    (async () => {
-      try {
-        wallet = new FedimintWallet();
-
-        // HACK: Expose client to global for testing in the browser console
-        globalThis.wallet = wallet
-
-        wallet.setLogLevel('debug')
-
-        // Tries to open the wallet. If it's not open (new user), it joins the federation
-        const isOpen = await wallet.open()
-        if (!isOpen) {
-          const joinRes = await wallet.joinFederation(TESTNET_INVITE_CODE)
+      // Override console methods to display in UI
+      const consoleDiv = document.getElementById('console')
+      ;['log', 'error', 'warn', 'info'].forEach((method) => {
+        const original = console[method]
+        console[method] = (...args) => {
+          original.apply(console, args)
+          const message = args
+            .map((arg) =>
+              typeof arg === 'object' ? JSON.stringify(arg, null, 2) : arg,
+            )
+            .join(' ')
+          consoleDiv.innerHTML += `${message}\n`
+          consoleDiv.scrollTop = consoleDiv.scrollHeight
         }
-        
+      })
 
       /////////////////////////////////
-      ////////// UI Actions //////////
+      ///////// Wallet Setup //////////
       ////////////////////////////////
 
-        // Set up event listeners for buttons
-        document.getElementById('getBalance').addEventListener('click', async () => {
-          const balance = await wallet.balance.getBalance();
-          console.log('Balance Response:', balance);
-        });
+      class BareWorkerTransport {
+        constructor() {
+          this.logger = console
+          this.messageHandler = () => {}
+          this.errorHandler = () => {}
+          this.worker = new Worker(new URL('./worker.js', import.meta.url), {
+            type: 'module',
+          })
+          this.worker.onmessage = (event) => {
+            const message = this.translateResponse(event.data)
+            if (message) {
+              this.messageHandler(message)
+            }
+          }
+          this.worker.onerror = (event) => {
+            this.errorHandler(event)
+          }
+        }
 
-        document.getElementById('createInvoice').addEventListener('click', async () => {
-          const createInvoice = await wallet.lightning.createInvoice(1000, "Test Invoice");
-          console.log('Invoice Response:', createInvoice);
-        });
+        setMessageHandler(handler) {
+          this.messageHandler = handler
+        }
 
-      } catch (e) {
-        console.error(e);
+        setErrorHandler(handler) {
+          this.errorHandler = handler
+        }
+
+        postMessage(message) {
+          if (message.type === 'cleanup') {
+            this.worker.terminate()
+            this.messageHandler({
+              type: 'data',
+              data: true,
+              request_id: message.requestId,
+            })
+            return
+          }
+
+          const translated = this.translateRequest(message)
+          if (!translated) {
+            this.messageHandler({
+              type: 'error',
+              error: `Unsupported message type: ${message.type}`,
+              request_id: message.requestId,
+            })
+            return
+          }
+
+          this.worker.postMessage(translated)
+        }
+
+        translateRequest(message) {
+          const { type, payload, requestId } = message
+
+          if (type === 'init') {
+            return { type: 'init', payload, requestId }
+          }
+
+          if (type === 'open_client') {
+            return {
+              type: 'open',
+              payload: { clientName: payload?.client_name },
+              requestId,
+            }
+          }
+
+          if (type === 'join_federation') {
+            return {
+              type: 'join',
+              payload: {
+                inviteCode: payload?.invite_code,
+                clientName: payload?.client_name,
+              },
+              requestId,
+            }
+          }
+
+          if (type === 'client_rpc') {
+            return {
+              type: 'rpc',
+              payload: {
+                module: payload?.module,
+                method: payload?.method,
+                body: payload?.payload,
+              },
+              requestId,
+            }
+          }
+
+          if (type === 'cancel_rpc') {
+            return {
+              type: 'unsubscribe',
+              requestId: payload?.cancel_request_id,
+            }
+          }
+
+          return null
+        }
+
+        translateResponse(message) {
+          const request_id = message.requestId
+
+          if (
+            message.type === 'initialized' ||
+            message.type === 'open' ||
+            message.type === 'join'
+          ) {
+            return { type: 'data', data: message.data, request_id }
+          }
+
+          if (message.type === 'rpcResponse') {
+            if (message.error !== undefined) {
+              return { type: 'error', error: message.error, request_id }
+            }
+            if (message.end !== undefined) {
+              return { type: 'end', end: message.end, request_id }
+            }
+            return { type: 'data', data: message.data, request_id }
+          }
+
+          if (message.type === 'error') {
+            return {
+              type: 'error',
+              error:
+                message.error instanceof Error
+                  ? message.error.message
+                  : String(message.error),
+              request_id,
+            }
+          }
+
+          return null
+        }
       }
-    })()
 
-  </script>
-</body>
+      let wallet
+      let director
+      const TESTNET_INVITE_CODE =
+        'fed11qgqzc2nhwden5te0vejkg6tdd9h8gepwvejkg6tdd9h8garhduhx6at5d9h8jmn9wshxxmmd9uqqzgxg6s3evnr6m9zdxr6hxkdkukexpcs3mn7mj3g5pc5dfh63l4tj6g9zk4er'
+
+      ;(async () => {
+        try {
+          director = new WalletDirector(new BareWorkerTransport())
+          director.setLogLevel('debug')
+          wallet = await director.createWallet()
+
+          // HACK: Expose client to global for testing in the browser console
+          globalThis.wallet = wallet
+          globalThis.director = director
+
+          try {
+            await wallet.open()
+          } catch (error) {
+            console.info('Wallet not open yet, joining federation...', error)
+            await wallet.joinFederation(TESTNET_INVITE_CODE)
+          }
+
+          /////////////////////////////////
+          ////////// UI Actions //////////
+          ////////////////////////////////
+
+          // Set up event listeners for buttons
+          document
+            .getElementById('getBalance')
+            .addEventListener('click', async () => {
+              const balance = await wallet.balance.getBalance()
+              console.log('Balance Response:', balance)
+            })
+
+          document
+            .getElementById('createInvoice')
+            .addEventListener('click', async () => {
+              const createInvoice = await wallet.lightning.createInvoice(
+                1000,
+                'Test Invoice',
+              )
+              console.log('Invoice Response:', createInvoice)
+            })
+        } catch (e) {
+          console.error(e)
+        }
+      })()
+    </script>
+  </body>
 </html>

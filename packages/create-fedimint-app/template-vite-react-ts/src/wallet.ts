@@ -1,9 +1,18 @@
-import { FedimintWallet } from '@fedimint/core'
+import { WalletDirector } from '@fedimint/core'
+import { WasmWorkerTransport } from '@fedimint/transport-web'
 
-const wallet = new FedimintWallet()
+const director = new WalletDirector(new WasmWorkerTransport())
+director.setLogLevel('debug')
 
-wallet.setLogLevel('debug')
+const wallet = await director.createWallet()
 
-wallet.open()
+try {
+  await wallet.open()
+} catch (error) {
+  console.debug(
+    'Wallet open skipped until a federation has been joined.',
+    error,
+  )
+}
 
-export { wallet }
+export { wallet, director }

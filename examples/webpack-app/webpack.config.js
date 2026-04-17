@@ -33,6 +33,7 @@ export default {
   },
   experiments: {
     asyncWebAssembly: true,
+    topLevelAwait: true,
   },
   plugins: [
     new HtmlWebpackPlugin({
